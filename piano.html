@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pocket Piano</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #1a1a22; color: #eee;
+    font-family: system-ui, -apple-system, sans-serif;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  body { display: flex; flex-direction: column; }
+  #topbar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 8px 12px; background: #23232e;
+    height: 54px; flex: 0 0 auto; overflow-x: auto; white-space: nowrap;
+  }
+  #chordbar {
+    display: flex; gap: 6px; padding: 6px 8px;
+    background: #2a2a36; flex: 0 0 auto;
+  }
+  .chord {
+    flex: 1; text-align: center; padding: 12px 4px;
+    background: #46465a; border-radius: 8px;
+    font-size: 15px; color: #eee; touch-action: none;
+  }
+  .chord.down { background: #6a6a90; }
+  #topbar h1 { font-size: 16px; margin: 0; font-weight: 600; flex: 0 0 auto; }
+  .ctrl { display: flex; align-items: center; gap: 6px; font-size: 13px; flex: 0 0 auto; }
+  #rec.on { background: #c0392b; }
+  #play.on, #loop.on, #metro.on, #countin.on, #chordstoggle.on, #sustain.on { background: #1e824c; }
+  button {
+    background: #3a3a48; color: #eee; border: none; border-radius: 8px;
+    padding: 8px 12px; font-size: 16px; min-width: 40px;
+  }
+  button:active { background: #555; }
+  select {
+    background: #3a3a48; color: #eee; border: none; border-radius: 8px;
+    padding: 8px; font-size: 14px;
+  }
+  #octlabel { min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; }
+  #piano {
+    position: relative; display: flex;
+    flex: 1 1 auto; min-height: 0; width: 100%;
+    padding: 0 4px 10px;
+  }
+  .white {
+    position: relative; flex: 1; height: 100%;
+    background: linear-gradient(#fefefe, #e8e8ee);
+    border: 1px solid #bbb; border-radius: 0 0 8px 8px;
+    margin: 0 1px;
+  }
+  .white.down { background: linear-gradient(#cfe8ff, #a9d2ff); }
+  .black {
+    position: absolute; top: 0; width: 60%; height: 62%;
+    background: linear-gradient(#3a3a44, #15151b);
+    border-radius: 0 0 6px 6px; z-index: 2;
+    transform: translateX(-50%);
+  }
+  .black.down { background: linear-gradient(#5a86b0, #2c4c6e); }
+  .label {
+    position: absolute; bottom: 6px; left: 0; right: 0;
+    text-align: center; font-size: 11px; color: #888; pointer-events: none;
+  }
+  .black .label { color: #cfcfcf; bottom: 5px; font-size: 10px; }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <h1>🎹 Pocket Piano</h1>
+    <div class="ctrl">
+      <button id="octdown">–</button>
+      <span id="octlabel">C4</span>
+      <button id="octup">+</button>
+    </div>
+    <div class="ctrl">
+      <label for="wave">Sound</label>
+      <select id="wave">
+        <option value="grand">Grand Piano</option>
+        <option value="rhodes">Electric Piano</option>
+        <option value="organ">Organ</option>
+        <option value="music">Music Box</option>
+        <option value="strings">Strings</option>
+        <option value="synth">Synth Lead</option>
+      </select>
+    </div>
+    <div class="ctrl">
+      <label for="reverb">Reverb</label>
+      <input id="reverb" type="range" min="0" max="100" value="0">
+      <button id="sustain">Sustain: Off</button>
+    </div>
+    <div class="ctrl">
+      <label for="attack">Attack</label>
+      <input id="attack" type="range" min="0" max="100" value="0" style="width:70px">
+      <span id="attacklabel">4 ms</span>
+    </div>
+    <div class="ctrl">
+      <button id="rec">● Rec</button>
+      <button id="play">▶ Play</button>
+      <button id="loop">Loop: Off</button>
+      <button id="clear">Clear</button>
+    </div>
+    <div class="ctrl">
+      <button id="metro">Metro: Off</button>
+      <input id="bpm" type="range" min="50" max="180" value="100" style="width:70px">
+      <span id="bpmlabel">100</span>
+      <button id="countin" class="on">Count-in: On</button>
+    </div>
+    <div class="ctrl">
+      <button id="chordstoggle" class="on">Chords: On</button>
+    </div>
+  </div>
+  <div id="chordbar">
+    <div class="chord" data-ch="C">C</div>
+    <div class="chord" data-ch="Dm">Dm</div>
+    <div class="chord" data-ch="Em">Em</div>
+    <div class="chord" data-ch="F">F</div>
+    <div class="chord" data-ch="G">G</div>
+    <div class="chord" data-ch="Am">Am</div>
+    <div class="chord" data-ch="G7">G7</div>
+  </div>
+  <div id="piano"></div>
+
+<script>
+const piano = document.getElementById('piano');
+const waveSel = document.getElementById('wave');
+const octLabel = document.getElementById('octlabel');
+
+let octave = 4;           // starting octave (C4 = middle C)
+const WHITE = ['C','D','E','F','G','A','B'];
+// which white note a sharp sits to the LEFT of, and the sharp's name
+const BLACKS = { 'C':'C#', 'D':'D#', 'F':'F#', 'G':'G#', 'A':'A#' };
+
+// ---- Audio ----
+let ctx, master, wet;
+function makeReverbIR(a, seconds, decay) {
+  // build a fake "room tail": fading random noise the convolver echoes the sound through
+  const len = a.sampleRate * seconds;
+  const buf = a.createBuffer(2, len, a.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+    }
+  }
+  return buf;
+}
+function audio() {
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain();
+    master.gain.value = 0.8;          // overall volume (keeps chords from clipping)
+
+    // dry path: straight to the speaker
+    master.connect(ctx.destination);
+
+    // wet path: master -> reverb -> wet volume -> speaker
+    const conv = ctx.createConvolver();
+    conv.buffer = makeReverbIR(ctx, 2.4, 2.5);
+    wet = ctx.createGain();
+    wet.gain.value = 0;               // starts off; the Reverb button turns it up
+    master.connect(conv).connect(wet).connect(ctx.destination);
+  }
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+
+// ---- Instrument presets (each note is built from harmonics + an envelope) ----
+// partials: [harmonic multiple, loudness]   a=attack d=decay s=sustain r=release
+const PRESETS = {
+  grand:   { partials:[[1,1],[2,0.5],[3,0.25],[4,0.12],[6,0.05]], type:'triangle', a:0.004, d:1.6, s:0,    r:0.35, cutoff:6000 },
+  rhodes:  { partials:[[1,1],[2,0.35],[4,0.12],[5,0.06]],          type:'sine',     a:0.004, d:1.4, s:0.15, r:0.30, cutoff:4500 },
+  organ:   { partials:[[1,1],[2,0.6],[3,0.4],[4,0.3],[6,0.2]],     type:'sine',     a:0.010, d:0.05,s:1,    r:0.08, cutoff:8000 },
+  music:   { partials:[[1,1],[3,0.4],[5,0.2],[7,0.1]],             type:'sine',     a:0.002, d:0.7, s:0,    r:0.20, cutoff:9000 },
+  strings: { partials:[[1,1],[2,0.5],[3,0.3]],                     type:'sawtooth', a:0.120, d:0.3, s:0.7,  r:0.45, cutoff:3500 },
+  synth:   { partials:[[1,1],[2,0.3]],                             type:'square',   a:0.006, d:0.2, s:0.6,  r:0.20, cutoff:5000 },
+};
+// note name -> frequency
+function freq(note, oct) {
+  const semis = {'C':0,'C#':1,'D':2,'D#':3,'E':4,'F':5,'F#':6,'G':7,'G#':8,'A':9,'A#':10,'B':11};
+  const n = semis[note] + (oct - 4) * 12;   // semitones from C4
+  return 261.63 * Math.pow(2, n / 12);      // C4 = 261.63 Hz
+}
+
+const active = {};  // id -> {oscs, env, r}
+function noteOn(id, note, oct) {
+  if (active[id]) return;
+  const a = audio();
+  const p = PRESETS[waveSel.value];
+  const base = freq(note, oct);
+  const t = a.currentTime;
+  const peak = 0.22;
+
+  // amplitude envelope: attack up to peak, then decay toward the sustain level
+  const env = a.createGain();
+  const filter = a.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = p.cutoff;
+  env.connect(filter).connect(master);
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(peak, t + attackTime);
+  env.gain.linearRampToValueAtTime(peak * p.s, t + attackTime + p.d);
+
+  // one oscillator per harmonic, summed into the envelope
+  const oscs = [];
+  for (const [mult, amp] of p.partials) {
+    const osc = a.createOscillator();
+    const g = a.createGain();
+    osc.type = p.type;
+    osc.frequency.value = base * mult;
+    g.gain.value = amp;
+    osc.connect(g).connect(env);
+    osc.start(t);
+    oscs.push(osc);
+  }
+  active[id] = { oscs, env, r: p.r };
+}
+let sustainOn = false;
+let sustained = [];             // voices the pedal is holding after you let go
+
+function releaseVoice(v) {       // actually fade out and stop a note
+  const a = audio();
+  const t = a.currentTime;
+  v.env.gain.cancelScheduledValues(t);
+  v.env.gain.setValueAtTime(v.env.gain.value, t);
+  v.env.gain.linearRampToValueAtTime(0, t + v.r); // gentle release
+  for (const osc of v.oscs) osc.stop(t + v.r + 0.02);
+}
+function noteOff(id) {
+  const v = active[id];
+  if (!v) return;
+  delete active[id];
+  if (sustainOn) { sustained.push(v); return; } // pedal down → let it keep ringing
+  releaseVoice(v);
+}
+
+// ---- Build keyboard (2 octaves of white keys) ----
+function build() {
+  piano.innerHTML = '';
+  const keys = [];          // collect white key elements to place blacks later
+  for (let o = 0; o < 2; o++) {
+    const oct = octave + o;
+    for (const w of WHITE) {
+      const el = document.createElement('div');
+      el.className = 'white';
+      el.dataset.note = w;
+      el.dataset.oct = oct;
+      el.innerHTML = '<span class="label">' + w + oct + '</span>';
+      piano.appendChild(el);
+      keys.push(el);
+    }
+  }
+  // place black keys overlapping the boundary between whites
+  requestAnimationFrame(() => {
+    keys.forEach(el => {
+      const w = el.dataset.note;
+      if (BLACKS[w]) {
+        const b = document.createElement('div');
+        b.className = 'black';
+        b.dataset.note = BLACKS[w];
+        b.dataset.oct = el.dataset.oct;
+        b.style.left = (el.offsetLeft + el.offsetWidth) + 'px';
+        b.style.height = (el.offsetHeight * 0.62) + 'px';
+        b.style.width = (el.offsetWidth * 0.6) + 'px';
+        b.innerHTML = '<span class="label">' + BLACKS[w] + '</span>';
+        piano.appendChild(b);
+      }
+    });
+  });
+  octLabel.textContent = 'C' + octave;
+}
+
+// ---- Touch / mouse handling (multi-touch friendly) ----
+function keyAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (el && (el.classList.contains('white') || el.classList.contains('black'))) return el;
+  return null;
+}
+const touchKey = {};  // touch id -> element
+
+function press(el, id) {
+  if (!el) return;
+  el.classList.add('down');
+  noteOn(id, el.dataset.note, +el.dataset.oct);
+  if (recording) events.push({ t: ctx.currentTime - recStart, type: 'on', note: el.dataset.note, oct: +el.dataset.oct });
+}
+function release(el, id) {
+  if (el) el.classList.remove('down');
+  noteOff(id);
+  if (recording && el) events.push({ t: ctx.currentTime - recStart, type: 'off', note: el.dataset.note, oct: +el.dataset.oct });
+}
+
+// Touch
+piano.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const el = keyAt(t.clientX, t.clientY);
+    touchKey[t.identifier] = el;
+    press(el, 't' + t.identifier);
+  }
+}, { passive: false });
+piano.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const el = keyAt(t.clientX, t.clientY);
+    const prev = touchKey[t.identifier];
+    if (el !== prev) {                 // slid onto a new key
+      release(prev, 't' + t.identifier);
+      touchKey[t.identifier] = el;
+      press(el, 't' + t.identifier);
+    }
+  }
+}, { passive: false });
+function endTouch(e) {
+  for (const t of e.changedTouches) {
+    release(touchKey[t.identifier], 't' + t.identifier);
+    delete touchKey[t.identifier];
+  }
+}
+piano.addEventListener('touchend', endTouch);
+piano.addEventListener('touchcancel', endTouch);
+
+// Mouse (for testing on a computer)
+let mouseDown = false;
+piano.addEventListener('mousedown', e => {
+  mouseDown = true;
+  const el = keyAt(e.clientX, e.clientY);
+  touchKey['mouse'] = el; press(el, 'mouse');
+});
+piano.addEventListener('mousemove', e => {
+  if (!mouseDown) return;
+  const el = keyAt(e.clientX, e.clientY);
+  if (el !== touchKey['mouse']) {
+    release(touchKey['mouse'], 'mouse');
+    touchKey['mouse'] = el; press(el, 'mouse');
+  }
+});
+window.addEventListener('mouseup', () => {
+  if (mouseDown) { release(touchKey['mouse'], 'mouse'); mouseDown = false; }
+});
+
+// ---- Octave buttons ----
+document.getElementById('octup').onclick = () => { if (octave < 6) { octave++; build(); } };
+document.getElementById('octdown').onclick = () => { if (octave > 1) { octave--; build(); } };
+
+// ---- Reverb amount slider ----
+const reverbSlider = document.getElementById('reverb');
+reverbSlider.oninput = () => {
+  const a = audio();                 // make sure the audio (and wet path) exists
+  const amount = reverbSlider.value / 100;   // 0 = none, 1 = lots
+  wet.gain.cancelScheduledValues(a.currentTime);
+  wet.gain.setValueAtTime(wet.gain.value, a.currentTime);
+  wet.gain.linearRampToValueAtTime(amount, a.currentTime + 0.05); // smooth, no click
+};
+
+// ---- Attack slider (how fast a note reaches full volume) ----
+let attackTime = 0.004;     // seconds; small = punchy, large = slow swell
+const attackSlider = document.getElementById('attack');
+const attackLabel = document.getElementById('attacklabel');
+attackSlider.oninput = () => {
+  attackTime = 0.004 + (attackSlider.value / 100) * 1.2;   // 4 ms … ~1.2 s
+  attackLabel.textContent = Math.round(attackTime * 1000) + ' ms';
+};
+
+// ---- Sustain (pedal) toggle ----
+const sustainBtn = document.getElementById('sustain');
+sustainBtn.onclick = () => {
+  audio();
+  sustainOn = !sustainOn;
+  sustainBtn.textContent = 'Sustain: ' + (sustainOn ? 'On' : 'Off');
+  sustainBtn.classList.toggle('on', sustainOn);
+  if (!sustainOn) {                     // pedal lifted → let all held notes fade out
+    sustained.forEach(releaseVoice);
+    sustained = [];
+  }
+};
+
+// ---- Record, play, loop, overdub ----
+let recording = false, playing = false, loopOn = false;
+let recStart = 0, cycleStart = 0, loopLen = 0, events = [], playTimers = [];
+let counting = false, countInOn = true, countTimers = [];
+const recBtn  = document.getElementById('rec');
+const playBtn = document.getElementById('play');
+const loopBtn = document.getElementById('loop');
+const clearBtn = document.getElementById('clear');
+
+function beginRecording() {
+  const a = audio();
+  if (events.length === 0) {          // first take: start a fresh loop from scratch
+    recStart = a.currentTime;
+  } else {                            // overdub: layer on top of the existing loop
+    if (!playing) startPlay();        // hear the loop while you add to it
+    recStart = cycleStart;            // time notes relative to this loop cycle
+  }
+  recording = true;
+  recBtn.classList.add('on');
+  recBtn.textContent = '● Stop';
+}
+
+recBtn.onclick = () => {
+  const a = audio();
+  if (recording) {                    // ---- stop recording ----
+    recording = false;
+    recBtn.classList.remove('on');
+    recBtn.textContent = '● Rec';
+    if (loopLen === 0) {              // first take just ended → lock in the loop length
+      loopLen = a.currentTime - recStart;
+      loopOn = true; loopBtn.textContent = 'Loop: On'; loopBtn.classList.add('on');
+    }
+    return;
+  }
+  if (counting) {                     // ---- tapped during count-in → cancel ----
+    countTimers.forEach(clearTimeout); countTimers = [];
+    counting = false;
+    recBtn.classList.remove('on'); recBtn.textContent = '● Rec';
+    return;
+  }
+  if (countInOn) {                    // ---- 4-click count-in, then record ----
+    counting = true;
+    recBtn.classList.add('on');
+    const beat = 60000 / bpm;
+    for (let i = 0; i < 4; i++) {
+      countTimers.push(setTimeout(() => { tick(); recBtn.textContent = '● ' + (4 - i); }, i * beat));
+    }
+    countTimers.push(setTimeout(() => { counting = false; countTimers = []; beginRecording(); }, 4 * beat));
+  } else {
+    beginRecording();
+  }
+};
+
+function startPlay() {
+  if (!events.length) return;
+  const a = audio();
+  playing = true;
+  playBtn.classList.add('on');
+  playBtn.textContent = '■ Stop';
+  cycleStart = a.currentTime;
+  if (recording) recStart = cycleStart;             // keep overdub aligned to this cycle
+  const len = loopLen || (events[events.length - 1].t + 0.5);
+  events.forEach(ev => {
+    const id = 'play_' + ev.note + ev.oct;          // one playback voice per note
+    playTimers.push(setTimeout(() => {
+      if (ev.type === 'on') noteOn(id, ev.note, ev.oct);
+      else noteOff(id);
+    }, ev.t * 1000));
+  });
+  playTimers.push(setTimeout(() => {
+    if (loopOn) { clearTimers(); startPlay(); }      // loop again (re-reads events, so overdubs appear)
+    else stopPlay();
+  }, len * 1000));
+}
+function clearTimers() { playTimers.forEach(clearTimeout); playTimers = []; }
+function stopPlay() {
+  clearTimers();
+  Object.keys(active).forEach(id => { if (id.startsWith('play_')) noteOff(id); }); // silence playback notes
+  playing = false;
+  playBtn.classList.remove('on');
+  playBtn.textContent = '▶ Play';
+}
+
+playBtn.onclick = () => { if (recording) return; playing ? stopPlay() : startPlay(); };
+
+loopBtn.onclick = () => {
+  loopOn = !loopOn;
+  loopBtn.textContent = 'Loop: ' + (loopOn ? 'On' : 'Off');
+  loopBtn.classList.toggle('on', loopOn);
+};
+
+clearBtn.onclick = () => {
+  if (recording) recBtn.onclick();   // stop recording first
+  stopPlay();
+  events = []; loopLen = 0;
+  loopOn = false; loopBtn.textContent = 'Loop: Off'; loopBtn.classList.remove('on');
+};
+
+// ---- Metronome ----
+let metroOn = false, metroTimer = null, bpm = 100;
+const metroBtn = document.getElementById('metro');
+const bpmSlider = document.getElementById('bpm');
+const bpmLabel = document.getElementById('bpmlabel');
+function tick() {
+  const a = audio(); const t = a.currentTime;
+  const o = a.createOscillator(), g = a.createGain();
+  o.frequency.value = 1500;                          // short high "click"
+  o.connect(g).connect(a.destination);
+  g.gain.setValueAtTime(0.25, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  o.start(t); o.stop(t + 0.06);
+}
+function restartMetro() {
+  clearInterval(metroTimer);
+  if (metroOn) { tick(); metroTimer = setInterval(tick, 60000 / bpm); }
+}
+metroBtn.onclick = () => {
+  audio();
+  metroOn = !metroOn;
+  metroBtn.textContent = 'Metro: ' + (metroOn ? 'On' : 'Off');
+  metroBtn.classList.toggle('on', metroOn);
+  restartMetro();
+};
+bpmSlider.oninput = () => {
+  bpm = +bpmSlider.value;
+  bpmLabel.textContent = bpm;
+  if (metroOn) restartMetro();
+};
+
+// ---- Count-in toggle ----
+const countBtn = document.getElementById('countin');
+countBtn.onclick = () => {
+  countInOn = !countInOn;
+  countBtn.textContent = 'Count-in: ' + (countInOn ? 'On' : 'Off');
+  countBtn.classList.toggle('on', countInOn);
+};
+
+// ---- Chord buttons (hold one finger = whole chord) ----
+// each chord is a few notes voiced low, so it sits under your melody
+const CHORDS = {
+  C:  [{note:'C',oct:3},{note:'E',oct:3},{note:'G',oct:3}],
+  Dm: [{note:'D',oct:3},{note:'F',oct:3},{note:'A',oct:3}],
+  Em: [{note:'E',oct:3},{note:'G',oct:3},{note:'B',oct:3}],
+  F:  [{note:'F',oct:3},{note:'A',oct:3},{note:'C',oct:4}],
+  G:  [{note:'G',oct:3},{note:'B',oct:3},{note:'D',oct:4}],
+  Am: [{note:'A',oct:3},{note:'C',oct:4},{note:'E',oct:4}],
+  G7: [{note:'G',oct:3},{note:'B',oct:3},{note:'D',oct:4},{note:'F',oct:4}],
+};
+const activeChords = new Set();
+function chordDown(name, el) {
+  if (activeChords.has(name)) return;
+  activeChords.add(name);
+  el.classList.add('down');
+  const t = audio().currentTime;
+  CHORDS[name].forEach((p, i) => {
+    noteOn('ch_' + name + '_' + i, p.note, p.oct);
+    if (recording) events.push({ t: t - recStart, type: 'on', note: p.note, oct: p.oct });
+  });
+}
+function chordUp(name, el) {
+  if (!activeChords.has(name)) return;
+  activeChords.delete(name);
+  el.classList.remove('down');
+  const t = audio().currentTime;
+  CHORDS[name].forEach((p, i) => {
+    noteOff('ch_' + name + '_' + i);
+    if (recording) events.push({ t: t - recStart, type: 'off', note: p.note, oct: p.oct });
+  });
+}
+document.querySelectorAll('.chord').forEach(el => {
+  const name = el.dataset.ch;
+  const down = e => { e.preventDefault(); chordDown(name, el); };
+  const up   = e => { e.preventDefault(); chordUp(name, el); };
+  el.addEventListener('touchstart', down, { passive: false });
+  el.addEventListener('touchend', up);
+  el.addEventListener('touchcancel', up);
+  el.addEventListener('mousedown', down);
+  el.addEventListener('mouseup', up);
+  el.addEventListener('mouseleave', () => { if (el.classList.contains('down')) chordUp(name, el); });
+});
+
+// ---- Show / hide the chord bar ----
+let chordsOn = true;
+const chordBar = document.getElementById('chordbar');
+const chordsToggle = document.getElementById('chordstoggle');
+chordsToggle.onclick = () => {
+  chordsOn = !chordsOn;
+  chordBar.style.display = chordsOn ? 'flex' : 'none';
+  chordsToggle.textContent = 'Chords: ' + (chordsOn ? 'On' : 'Off');
+  chordsToggle.classList.toggle('on', chordsOn);
+  build();   // piano resized → re-place the black keys
+};
+
+window.addEventListener('resize', build);
+build();
+</script>
+</body>
+</html>
