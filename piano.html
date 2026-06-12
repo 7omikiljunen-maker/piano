@@ -33,6 +33,7 @@
   #topbar h1 { font-size: 16px; margin: 0; font-weight: 600; flex: 0 0 auto; }
   .ctrl { display: flex; align-items: center; gap: 6px; font-size: 13px; flex: 0 0 auto; }
   #rec.on { background: #c0392b; }
+  #panic { background: #c0392b; }
   #play.on, #loop.on, #metro.on, #countin.on, #chordstoggle.on, #sustain.on { background: #1e824c; }
   button {
     background: #3a3a48; color: #eee; border: none; border-radius: 8px;
@@ -104,6 +105,7 @@
       <button id="play">▶ Play</button>
       <button id="loop">Loop: Off</button>
       <button id="clear">Clear</button>
+      <button id="panic">🔇 Silence</button>
     </div>
     <div class="ctrl">
       <button id="metro">Metro: Off</button>
@@ -571,6 +573,32 @@ chordsToggle.onclick = () => {
   chordsToggle.textContent = 'Chords: ' + (chordsOn ? 'On' : 'Off');
   chordsToggle.classList.toggle('on', chordsOn);
   build();   // piano resized → re-place the black keys
+};
+
+// ---- Panic button: kill every sounding note + the reverb tail ----
+document.getElementById('panic').onclick = () => {
+  const a = audio();
+  const now = a.currentTime;
+  stopPlay();                                  // stop playback + its loop timers
+  // hard-stop every voice (currently held AND pedal-sustained)
+  const all = Object.values(active).concat(sustained);
+  all.forEach(v => {
+    v.env.gain.cancelScheduledValues(now);
+    v.env.gain.setValueAtTime(0, now);         // silence instantly
+    v.oscs.forEach(o => { try { o.stop(now); } catch (e) {} });
+  });
+  for (const k in active) delete active[k];
+  sustained = [];
+  // reset all visual + chord state
+  activeChords.clear();
+  document.querySelectorAll('.down').forEach(el => el.classList.remove('down'));
+  // cut the lingering reverb wash, then restore the reverb level
+  if (wet) {
+    const amt = reverbSlider.value / 100;
+    wet.gain.cancelScheduledValues(now);
+    wet.gain.setValueAtTime(0, now);
+    wet.gain.setValueAtTime(amt, now + 0.15);
+  }
 };
 
 window.addEventListener('resize', build);
