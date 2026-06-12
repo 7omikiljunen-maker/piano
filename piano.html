@@ -145,6 +145,7 @@
     <div class="drum" data-drum="Kick">Kick</div>
     <div class="drum" data-drum="Snare">Snare</div>
     <div class="drum" data-drum="Hat">Hi-Hat</div>
+    <div class="drum" data-drum="Open">Open Hat</div>
     <div class="drum" data-drum="Clap">Clap</div>
   </div>
   <div id="piano"></div>
@@ -653,6 +654,11 @@ function playDrum(name) {
     hp.type = 'highpass'; hp.frequency.value = 7000;
     ng.gain.setValueAtTime(0.4, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
     src.connect(hp).connect(ng).connect(master); src.start(t); src.stop(t + 0.05);
+  } else if (name === 'Open') {               // same bright noise, long ring-out
+    const src = noiseBurst(a, 0.4), hp = a.createBiquadFilter(), ng = a.createGain();
+    hp.type = 'highpass'; hp.frequency.value = 7000;
+    ng.gain.setValueAtTime(0.35, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    src.connect(hp).connect(ng).connect(master); src.start(t); src.stop(t + 0.4);
   } else if (name === 'Clap') {               // band-limited noise burst
     const src = noiseBurst(a, 0.2), bp = a.createBiquadFilter(), ng = a.createGain();
     bp.type = 'bandpass'; bp.frequency.value = 1200; bp.Q.value = 1;
