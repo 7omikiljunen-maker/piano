@@ -115,6 +115,26 @@
       <input id="vibrato" type="range" min="0" max="100" value="0" style="width:70px">
     </div>
     <div class="ctrl">
+      <label for="tremolo">Tremolo</label>
+      <input id="tremolo" type="range" min="0" max="100" value="0" style="width:70px">
+    </div>
+    <div class="ctrl">
+      <label for="dist">Distort</label>
+      <input id="dist" type="range" min="0" max="100" value="0" style="width:70px">
+    </div>
+    <div class="ctrl">
+      <label for="tone">Tone</label>
+      <input id="tone" type="range" min="0" max="100" value="100" style="width:70px">
+    </div>
+    <div class="ctrl">
+      <label for="chorus">Chorus</label>
+      <input id="chorus" type="range" min="0" max="100" value="0" style="width:70px">
+    </div>
+    <div class="ctrl">
+      <label for="vol">Volume</label>
+      <input id="vol" type="range" min="0" max="100" value="100" style="width:70px">
+    </div>
+    <div class="ctrl">
       <button id="rec">● Rec</button>
       <button id="play">▶ Play</button>
       <button id="loop">Loop: Off</button>
@@ -161,8 +181,18 @@ const WHITE = ['C','D','E','F','G','A','B'];
 const BLACKS = { 'C':'C#', 'D':'D#', 'F':'F#', 'G':'G#', 'A':'A#' };
 
 // ---- Audio ----
-let ctx, master, wet, lfo, lfoGain;
+let ctx, master, wet, lfo, lfoGain, shaper, outGain, tremLfo, tremDepth;
+let toneFilter, chorusDelay, chorusLfo, chorusDepth, chorusMix, volGain;
 let vibratoDepth = 0;          // cents of pitch wobble (0 = off)
+function makeDistortionCurve(k) {       // k 0..1 → amount of crunch
+  if (k <= 0) return null;              // null curve = clean bypass
+  const n = 44100, curve = new Float32Array(n), amt = k * 120;
+  for (let i = 0; i < n; i++) {
+    const x = i * 2 / n - 1;
+    curve[i] = (3 + amt) * x * 0.3 / (Math.PI + amt * Math.abs(x));
+  }
+  return curve;
+}
 function makeReverbIR(a, seconds, decay) {
   // build a fake "room tail": fading random noise the convolver echoes the sound through
   const len = a.sampleRate * seconds;
@@ -181,15 +211,46 @@ function audio() {
     master = ctx.createGain();
     master.gain.value = 0.8;          // overall volume (keeps chords from clipping)
 
-    // dry path: straight to the speaker
-    master.connect(ctx.destination);
+    // distortion stage (clean until the Distort slider adds a curve)
+    shaper = ctx.createWaveShaper();
+    shaper.oversample = '2x';
 
-    // wet path: master -> reverb -> wet volume -> speaker
+    // final output gain (the Tremolo LFO wobbles this)
+    outGain = ctx.createGain();
+    outGain.gain.value = 1;
+    volGain = ctx.createGain();
+    volGain.gain.value = 1;           // master volume (final, after distortion)
+    outGain.connect(volGain).connect(ctx.destination);
+
+    // tone: master brightness filter (open = neutral)
+    toneFilter = ctx.createBiquadFilter();
+    toneFilter.type = 'lowpass';
+    toneFilter.frequency.value = 18000;
+    master.connect(toneFilter);
+
+    // chorus: a short, slowly-wandering delayed copy mixed back in (off by default)
+    chorusDelay = ctx.createDelay();
+    chorusDelay.delayTime.value = 0.025;
+    chorusLfo = ctx.createOscillator();
+    chorusLfo.frequency.value = 0.6;
+    chorusDepth = ctx.createGain();
+    chorusDepth.gain.value = 0.004;
+    chorusLfo.connect(chorusDepth).connect(chorusDelay.delayTime);
+    chorusLfo.start();
+    chorusMix = ctx.createGain();
+    chorusMix.gain.value = 0;          // 0 = off
+    toneFilter.connect(chorusDelay);
+    chorusDelay.connect(chorusMix).connect(shaper);
+
+    toneFilter.connect(shaper);       // dry path (through tone)
+    shaper.connect(outGain);
+
+    // wet path: (distorted) signal -> reverb -> wet volume -> output
     const conv = ctx.createConvolver();
     conv.buffer = makeReverbIR(ctx, 2.4, 2.5);
     wet = ctx.createGain();
-    wet.gain.value = 0;               // starts off; the Reverb button turns it up
-    master.connect(conv).connect(wet).connect(ctx.destination);
+    wet.gain.value = 0;               // starts off; the Reverb slider turns it up
+    shaper.connect(conv).connect(wet).connect(outGain);
 
     // vibrato LFO: a slow wobble added to every note's pitch
     lfo = ctx.createOscillator();
@@ -198,6 +259,14 @@ function audio() {
     lfoGain.gain.value = vibratoDepth;  // wobble depth (cents)
     lfo.connect(lfoGain);
     lfo.start();
+
+    // tremolo LFO: wobbles the output volume up and down
+    tremLfo = ctx.createOscillator();
+    tremLfo.frequency.value = 5;        // pulse speed (Hz)
+    tremDepth = ctx.createGain();
+    tremDepth.gain.value = 0;           // 0 = no tremolo
+    tremLfo.connect(tremDepth).connect(outGain.gain);
+    tremLfo.start();
   }
   if (ctx.state === 'suspended') ctx.resume();
   return ctx;
@@ -407,6 +476,43 @@ vibratoSlider.oninput = () => {
   audio();                                       // make sure the LFO exists
   vibratoDepth = (vibratoSlider.value / 100) * 50;   // 0 … 50 cents
   lfoGain.gain.value = vibratoDepth;
+};
+
+// ---- Tremolo slider (output volume pulsing) ----
+const tremoloSlider = document.getElementById('tremolo');
+tremoloSlider.oninput = () => {
+  audio();
+  const d = tremoloSlider.value / 100;   // 0 … 1 depth
+  tremDepth.gain.value = d / 2;          // LFO swing
+  outGain.gain.value = 1 - d / 2;        // base so volume ranges [1-d, 1]
+};
+
+// ---- Distortion slider (crunch / overdrive) ----
+const distSlider = document.getElementById('dist');
+distSlider.oninput = () => {
+  audio();
+  shaper.curve = makeDistortionCurve(distSlider.value / 100);
+};
+
+// ---- Tone slider (dark → bright) ----
+const toneSlider = document.getElementById('tone');
+toneSlider.oninput = () => {
+  audio();
+  toneFilter.frequency.value = 300 * Math.pow(60, toneSlider.value / 100); // 300 … 18000 Hz
+};
+
+// ---- Chorus slider (width / shimmer) ----
+const chorusSlider = document.getElementById('chorus');
+chorusSlider.oninput = () => {
+  audio();
+  chorusMix.gain.value = (chorusSlider.value / 100) * 0.7;
+};
+
+// ---- Master volume slider (final output level) ----
+const volSlider = document.getElementById('vol');
+volSlider.oninput = () => {
+  audio();
+  volGain.gain.value = volSlider.value / 100;   // 0 … 1
 };
 
 // ---- Sustain (pedal) toggle ----
